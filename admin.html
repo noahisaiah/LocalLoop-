@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LocalLoop Admin — Business Directory</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#0e0f11;color:#f2f2ef;max-width:1000px;margin:0 auto;padding:24px;line-height:1.5}
+  a{color:#2dd4bf} input,select{padding:8px;border-radius:8px;border:1px solid #333;background:#17191d;color:#fff}
+  button{background:#2dd4bf;color:#081210;font-weight:700;border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
+  button.ghost{background:transparent;color:#fff;border:1px solid #333}
+  table{width:100%;border-collapse:collapse;margin-top:16px} th,td{border-bottom:1px solid #26292f;padding:8px;text-align:left;font-size:.9rem}
+  .card{background:#17191d;border:1px solid #26292f;border-radius:14px;padding:20px;margin-top:16px}
+  .err{color:#ff8a8a} .ok{color:#2dd4bf}
+  label{display:block;margin:8px 0} label input{margin-left:6px}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<h1>LocalLoop Admin</h1>
+<p>Business directory — only signed-in admins can see or change this. Locking is enforced by the database, not by this page.</p>
+
+<div id="login" class="card">
+  <h2>Admin sign in</h2>
+  <p><input id="email" type="email" placeholder="Admin email" autocomplete="username">
+  <input id="password" type="password" placeholder="Password" autocomplete="current-password"></p>
+  <p><button id="signin">Sign in</button></p>
+  <p id="loginMsg" class="err"></p>
+  <p style="color:#a8adb3">Admin account is created in the Supabase dashboard. If sign-in works but the directory stays empty, your user is not in the <code>admins</code> table yet — see the setup README.</p>
+</div>
+
+<div id="app" style="display:none">
+  <p><span id="who"></span> <button class="ghost" id="signout">Sign out</button></p>
+
+  <div class="card">
+    <h2>Add a business</h2>
+    <p><input id="newName" placeholder="Business name"> <input id="newContact" placeholder="Contact name">
+    <input id="newEmail" placeholder="Contact email" type="email">
+    <select id="newPlan"><option>Starter</option><option>Growth</option><option>Voice + Custom</option></select>
+    <input id="newPaidUntil" type="date"></p>
+    <p><button id="addBtn">Add business (starts locked)</button> <span id="addMsg" class="ok"></span></p>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+const { supabaseUrl, supabaseAnonKey } = window.LOCALLOOP_CONFIG;
+const supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+const FEATURES = ["voice_ai","ai_replies","booking","lead_followup","reviews","reminders"];
+const LABELS = {voice_ai:"Voice AI",ai_replies:"AI replies",booking:"Booking",lead_followup:"Lead follow-up",reviews:"Reviews",reminders:"Reminders"};
+
+async function refresh(){
+  const { data, error } = await supabase.from("businesses").select("*").order("name");
+  const el = document.getElementById("list");
+  if (error) { el.innerHTML = `<p class="err">${error.message}</p><p>If you can sign in but see this, you are probably not in the admins table.</p>`; return; }
+  if (!data.length) { el.innerHTML = "<p>No businesses yet. Add one above.</p>"; return; }
+  el.innerHTML = `<table><tr><th>Business</th><th>Plan</th><th>Status</th><th>Paid until</th><th>Services on</th><th></th></tr>` +
+    data.map(b => `<tr>
+      <td><strong>${b.name}</strong><br><span style="color:#a8adb3">${b.contact||""} ${b.contact_email||""}</span></td>
+      <td><select data-f="plan" data-id="${b.id}"><option ${b.plan==="Starter"?"selected":""}>Starter</option><option ${b.plan==="Growth"?"selected":""}>Growth</option><option ${b.plan==="Voice + Custom"?"selected":""}>Voice + Custom</option></select></td>
+      <td><select data-f="status" data-id="${b.id}"><option value="active" ${b.status==="active"?"selected":""}>active</option><option value="locked" ${b.status==="locked"?"selected":""}>locked</option></select></td>
+      <td><input type="date" data-f="paid_until" data-id="${b.id}" value="${b.paid_until||""}"></td>
+      <td>${FEATURES.map(f => `<label><input type="checkbox" data-f="${f}" data-id="${b.id}" ${b[f]?"checked":""}> ${LABELS[f]}</label>`).join(" ")}</td>
+      <td><button class="ghost" data-del="${b.id}">Delete</button></td></tr>`).join("") + "</table>" +
+    `<p style="color:#a8adb3">Changes save to Supabase immediately. A business set to locked, or past its paid-until date, returns no data to the client page — that check runs in the database.</p>`;
+  el.querySelectorAll("[data-f]").forEach(input => input.addEventListener("change", async (e) => {
+    const patch = {}; patch[e.target.dataset.f] = e.target.type === "checkbox" ? e.target.checked : (e.target.value || null);
+    const { error } = await supabase.from("businesses").update(patch).eq("id", e.target.dataset.id);
+    if (error) alert(error.message); else refresh();
+  }));
+  el.querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", async () => {
+    if (!confirm("Delete this business?")) return;
+    await supabase.from("businesses").delete().eq("id", btn.dataset.del); refresh();
+  }));
+}
+
+document.getElementById("signin").onclick = async () => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: document.getElementById("email").value.trim(),
+    password: document.getElementById("password").value });
+  if (error) { document.getElementById("loginMsg").textContent = error.message; return; }
+  document.getElementById("who").textContent = "Signed in as " + data.user.email;
+  document.getElementById("login").style.display = "none";
+  document.getElementById("app").style.display = "block"; refresh();
+};
+document.getElementById("signout").onclick = async () => { await supabase.auth.signOut(); location.reload(); };
+document.getElementById("addBtn").onclick = async () => {
+  const name = document.getElementById("newName").value.trim();
+  if (!name) return alert("Enter a business name");
+  const { error } = await supabase.from("businesses").insert({
+    name, contact: document.getElementById("newContact").value.trim() || null,
+    contact_email: document.getElementById("newEmail").value.trim() || null,
+    plan: document.getElementById("newPlan").value,
+    paid_until: document.getElementById("newPaidUntil").value || null, status: "locked" });
+  document.getElementById("addMsg").textContent = error ? error.message : "Added (locked). Flip it to active and set its services when payment is confirmed.";
+  if (!error) refresh();
+};
+supabase.auth.getSession().then(({data}) => {
+  if (data.session) {
+    document.getElementById("who").textContent = "Signed in as " + data.session.user.email;
+    document.getElementById("login").style.display = "none";
+    document.getElementById("app").style.display = "block"; refresh();
+  }
+});
+</script>
+</body>
+</html>
