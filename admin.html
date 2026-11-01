@@ -77,10 +77,13 @@ async function refresh(){
 }
 
 document.getElementById("signin").onclick = async () => {
+  const msg = document.getElementById("loginMsg");
+  msg.textContent = "Signing in…";
   const { data, error } = await supabase.auth.signInWithPassword({
     email: document.getElementById("email").value.trim(),
     password: document.getElementById("password").value });
-  if (error) { document.getElementById("loginMsg").textContent = error.message; return; }
+  if (error) { msg.textContent = "Sign-in failed: " + error.message; return; }
+  if (!data.user) { msg.textContent = "Sign-in did not return a user. Please try again."; return; }
   document.getElementById("who").textContent = "Signed in as " + data.user.email;
   document.getElementById("login").style.display = "none";
   document.getElementById("app").style.display = "block"; refresh();
